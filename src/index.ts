@@ -10,8 +10,7 @@ const fixturePath = fixtureArg ? resolve(fixtureArg) : dryRun && !hasVercelConfi
 
 try {
   const config = fixturePath && dryRun ? undefined : readConfig(process.env, { requireFeishu: !dryRun });
-  const result = await runMonitor({ ...(config ? { config } : {}), dryRun, ...(fixturePath ? { fixturePath } : {}), onProgress: (message) => console.log(message), statePath: resolve("data/state.json") });
-  console.log(JSON.stringify({ mode: dryRun ? "dry-run" : "live", source: fixturePath ? "fixture" : "vercel", logsRead: result.logsRead, alertCount: result.alerts.length, statePersisted: result.statePersisted }, null, 2));
+  await runMonitor({ ...(config ? { config } : {}), dryRun, ...(fixturePath ? { fixturePath } : {}), onProgress: (message) => console.log(message), statePath: resolve("data/state.json") });
 } catch (error) {
   console.error(redactSecrets(error instanceof Error ? error.message : error));
   process.exitCode = 1;

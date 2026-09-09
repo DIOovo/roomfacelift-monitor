@@ -87,7 +87,13 @@ test("Feishu failure retains pending alerts in persisted state", async () => {
 test("Vercel API failures are safe and do not expose bearer tokens", async () => {
   const secret = "super-secret-vercel-token";
   await assert.rejects(
-    getRuntimeLogs({ config: { ...config(), vercelToken: secret }, deploymentId: "dpl_test", since: 0, until: NOW, fetcher: async () => new Response(JSON.stringify({ message: `Bearer ${secret} jane@example.com` }), { status: 500 }) }),
+    getRuntimeLogs({
+      config: { ...config(), vercelToken: secret },
+      deploymentId: "dpl_test",
+      since: 0,
+      until: NOW,
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: `Bearer ${secret} jane@example.com` }),
+    }),
     (error) => error instanceof Error && !error.message.includes(secret) && !error.message.includes("jane@example.com"),
   );
 });

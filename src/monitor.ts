@@ -5,6 +5,7 @@ import { redactSecrets } from "./redact.js";
 import { loadState, saveState } from "./state.js";
 import type { MonitorConfig, RuntimeLog } from "./types.js";
 import { getLatestProductionDeployment, getRuntimeLogs, parseRuntimeLogs } from "./vercel.js";
+import type { VercelLogsRunner } from "./vercel.js";
 
 const DEFAULT_LOOKBACK_MS = 10 * 60 * 1000;
 
@@ -15,6 +16,7 @@ export async function runMonitor(input: {
   statePath: string;
   now?: number;
   fetcher?: typeof fetch;
+  vercelLogsRunner?: VercelLogsRunner;
   onProgress?: (message: string) => void;
 }) {
   const now = input.now ?? Date.now();
@@ -27,12 +29,14 @@ export async function runMonitor(input: {
       logs = parseRuntimeLogs(await readFile(input.fixturePath, "utf8"), deploymentId);
     } else {
       if (!input.config) throw new Error("Vercel configuration is required when no fixture is selected.");
-      input.onProgress?.("Fetching latest production deployment...");
+      input.onProgress?.("Resolving production deployment...");
       deploymentId = await getLatestProductionDeployment(input.config, input.fetcher);
       input.onProgress?.("Production deployment resolved.");
-      const since = Math.max(0, (originalState.lastProcessedTimestamp || now - DEFAULT_LOOKBACK_MS) - 1000);
-      input.onProgress?.("Fetching runtime logs...");
-      logs = await getRuntimeLogs({ config: input.config, deploymentId, since, until: now, ...(input.fetcher ? { fetcher: input.fetcher } : {}) });
+      const since = Math.max(0, originalState.lastProcessedTimestamp
+        ? originalState.lastProcessedTimestamp - 1000
+        : now - DEFAULT_LOOKBACK_MS);
+      input.onProgress?.("Fetching runtime logs with Vercel CLI...");
+      logs = await getRuntimeLogs({ config: input.config, deploymentId, since, until: now, ...(input.vercelLogsRunner ? { runner: input.vercelLogsRunner } : {}) });
     }
   } catch (error) {
     throw new Error(`Monitor could not read Vercel logs safely: ${redactSecrets(error instanceof Error ? error.message : error)}`);
@@ -42,6 +46,7 @@ export async function runMonitor(input: {
   input.onProgress?.("Analyzing logs...");
   const productionLogs = logs.filter((log) => log.environment === "production").map((log) => ({ ...log, deploymentId: log.deploymentId || deploymentId }));
   const { state, alerts } = analyzeLogs(productionLogs, originalState, now);
+  input.onProgress?.(`Alerts detected: ${alerts.length}`);
   if (input.dryRun) {
     input.onProgress?.("Dry run completed.");
     return { deploymentId, logsRead: productionLogs.length, alerts, statePersisted: false };

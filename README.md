@@ -26,34 +26,38 @@ GET https://api.vercel.com/v6/deployments
     &limit=1
 ```
 
-It then reads only that deployment's production logs using:
+It then starts the pinned `vercel@59.13.1` CLI with an argument array. The command shape is:
 
 ```text
-GET https://vercel.com/api/logs/request-logs
-    ?projectId=<VERCEL_PROJECT_ID>
-    &ownerId=<VERCEL_TEAM_ID>
-    &deploymentId=<resolved deployment>
-    &environment=production
-    &startDate=<last processed timestamp, milliseconds>
-    &endDate=<now, milliseconds>
-    &page=0
+vercel logs
+  --deployment <resolved deployment>
+  --project <VERCEL_PROJECT_ID>
+  --scope <VERCEL_TEAM_ID>
+  --environment production
+  --since <ISO timestamp>
+  --until <ISO timestamp>
+  --limit 1000
+  --json
+  --no-follow
+  --non-interactive
+  --no-color
+  --token <VERCEL_TOKEN>
 ```
 
-This is the finite historical JSON endpoint used by the [official Vercel CLI implementation](https://github.com/vercel/vercel/blob/main/packages/cli/src/util/logs-v2.ts), returning `{ rows, hasMoreRows }`. It is not a separately documented public REST API contract; account access and future compatibility must be confirmed by an authenticated Actions dry-run. The monitor follows pages within a total 20-second logs budget and caps the historical query at 1,000 records. If more pages remain at the cap, it fails without advancing state. Nested request messages are preserved, including error messages after the first entry.
+These flags were verified against `vercel logs --help` from the pinned CLI. Historical mode is the default; `--follow` is only enabled when explicitly passed. The monitor still supplies `--no-follow` to make the intended mode visible. `--json` produces JSON Lines on stdout. The token is passed only to the child process and the command or complete argv is never logged.
 
-The previous `/v1/projects/{projectId}/deployments/{deploymentId}/runtime-logs` endpoint [returns a stream](https://github.com/vercel/sdk/blob/main/docs/sdks/logs/README.md). Its [SDK request](https://github.com/vercel/sdk/blob/main/src/funcs/logsGetRuntimeLogs.ts) uses `application/stream+json` and does not declare `since`, `until`, `limit`, or `environment` query parameters. Adding those parameters did not establish a finite historical query. The previous unbounded `response.text()` could therefore wait until the workflow killed the job.
+The monitor does not call the undocumented `/api/logs/request-logs` endpoint. If the official CLI cannot read historical logs for the account or token, its sanitized error is reported and the run fails without changing state or falling back to an internal endpoint.
 
 ### Request bounds and diagnostics
 
-- Deployment lookup has a 20-second deadline covering headers and the response body. All historical pages share a separate 20-second deadline, so every page has at most 20 seconds remaining.
-- Requests accept JSON/NDJSON, without advertising SSE. All bodies use a reader, with a 16 MiB per-response size cap.
-- Unexpected NDJSON, `application/stream+json`, and SSE responses have a 12-second read deadline and a 5-second idle deadline. EOF or `[DONE]` completes the response. Reaching 1,000 records without completion, timeout, or invalid data fails safely instead of persisting a partial window.
-- Every early exit cancels the reader; request completion/failure aborts the controller and clears timers. Reader cancellation itself is never awaited indefinitely.
-- `AbortError` and `TimeoutError` become `Monitor could not read Vercel logs safely: Vercel runtime logs request timed out.` Network errors and HTTP failures expose only fixed messages and status codes, never raw response bodies or URLs.
-- Actions prints deployment lookup, logs lookup, received count, analysis, and dry-run completion stages. The final console summary contains counts only, without alert messages or deployment identifiers.
+- Deployment lookup has a 20-second deadline covering headers and the response body.
+- The CLI gets 20 seconds. At the deadline the monitor sends `SIGTERM`, waits one second, and sends `SIGKILL` if necessary. The error is `Vercel logs command timed out.`
+- Stdout is limited to 16 MiB and stderr to 64 KiB. JSON and NDJSON are parsed only after a successful exit.
+- CLI failures retain useful sanitized text such as an HTTP status while removing credentials, project/team identifiers, URLs, emails, UUIDs, cookies, and authorization values.
+- Actions prints only safe stages and counts. The final console summary contains counts only, without alert messages or deployment identifiers.
 - The workflow remains scheduled every five minutes with `timeout-minutes: 4` as the final safeguard.
 
-Vercel documents retention limits in [Runtime Logs](https://vercel.com/docs/logs/runtime). Local fixtures also support JSON arrays, `{ logs: [] }`, and `{ data: [] }`.
+The initial query covers the previous ten minutes. Later queries start one second before the last processed timestamp and end at the current run time. Local fixtures also support JSON arrays, `{ logs: [] }`, and `{ data: [] }`.
 
 ### 3. Create a Feishu custom bot
 
