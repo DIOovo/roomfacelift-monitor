@@ -2,6 +2,11 @@ import type { MonitorConfig } from "./types.js";
 
 const REQUIRED = ["VERCEL_TOKEN", "VERCEL_PROJECT_ID", "VERCEL_TEAM_ID", "FEISHU_WEBHOOK_URL"] as const;
 
+export type FeishuConfig = {
+  feishuWebhookUrl: string;
+  feishuWebhookSecret?: string;
+};
+
 export function readConfig(
   environment: NodeJS.ProcessEnv = process.env,
   options: { requireFeishu?: boolean } = {},
@@ -21,4 +26,14 @@ export function readConfig(
 
 export function hasVercelConfig(environment: NodeJS.ProcessEnv = process.env) {
   return ["VERCEL_TOKEN", "VERCEL_PROJECT_ID", "VERCEL_TEAM_ID"].every((key) => Boolean(environment[key]?.trim()));
+}
+
+export function readFeishuConfig(environment: NodeJS.ProcessEnv = process.env): FeishuConfig {
+  const webhookUrl = environment.FEISHU_WEBHOOK_URL?.trim();
+  if (!webhookUrl) throw new Error("Missing required environment variable: FEISHU_WEBHOOK_URL");
+  const secret = environment.FEISHU_WEBHOOK_SECRET?.trim();
+  return {
+    feishuWebhookUrl: webhookUrl,
+    ...(secret ? { feishuWebhookSecret: secret } : {}),
+  };
 }

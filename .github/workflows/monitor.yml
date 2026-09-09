@@ -10,6 +10,11 @@ on:
         required: false
         type: boolean
         default: false
+      send_test_alert:
+        description: Send a synthetic alert to Feishu
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +34,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Restore monitor state
+        if: ${{ !inputs.send_test_alert }}
         uses: actions/cache/restore@v4
         with:
           path: data/state.json
@@ -36,9 +42,17 @@ jobs:
           restore-keys: |
             roomfacelift-monitor-state-
       - name: Initialize state when cache is empty
+        if: ${{ !inputs.send_test_alert }}
         run: test -f data/state.json || cp data/state.example.json data/state.json
       - run: npm ci
+      - name: Send Feishu self-test
+        if: ${{ inputs.send_test_alert }}
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+        run: npm --silent run monitor -- --send-test-alert
       - name: Monitor production runtime logs
+        if: ${{ !inputs.send_test_alert }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -47,7 +61,7 @@ jobs:
           FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
         run: npm run monitor -- ${{ inputs.dry_run && '--dry-run' || '' }}
       - name: Save monitor state
-        if: always() && hashFiles('data/state.json') != ''
+        if: always() && !inputs.send_test_alert && hashFiles('data/state.json') != ''
         uses: actions/cache/save@v4
         with:
           path: data/state.json

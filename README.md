@@ -133,4 +133,6 @@ Vercel and Feishu API errors are sanitized before reaching console output. Secre
 
 `.github/workflows/monitor.yml` runs every five minutes and supports manual `workflow_dispatch` with a dry-run checkbox. Scheduled workflows may start a few minutes late during GitHub load.
 
+For a manual Feishu delivery check, run the workflow with **Send a synthetic alert to Feishu** enabled. That mode sends one fixed `/monitor/self-test` alert through the configured bot and exits without reading Vercel, restoring or saving monitor state, or running normal monitoring. The self-test Action step receives only `FEISHU_WEBHOOK_URL` and the optional `FEISHU_WEBHOOK_SECRET` from GitHub Secrets.
+
 To pause monitoring, disable the workflow from the repository's **Actions** page. To resume it, enable the workflow again. Do not delete secrets merely to pause: missing credentials correctly make the workflow fail.
