@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+data/state.json
+*.log
+.DS_Store
+
+.idea/

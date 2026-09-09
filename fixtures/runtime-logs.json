@@ -1,0 +1,14 @@
+[
+  { "id": "ok-200", "timestamp": 1788912000000, "environment": "production", "deploymentId": "dpl_fixture", "method": "GET", "route": "/", "statusCode": 200, "level": "info", "message": "Homepage rendered" },
+  { "id": "expected-400", "timestamp": 1788912001000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/contact", "statusCode": 400, "level": "warning", "message": "Invalid input" },
+  { "id": "unexpected-400", "timestamp": 1788912002000, "environment": "production", "deploymentId": "dpl_fixture", "method": "PATCH", "route": "/api/uploads/room-image", "statusCode": 400, "level": "warning", "message": "Only PNG and JPG images are accepted" },
+  { "id": "expected-401", "timestamp": 1788912003000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/generate", "statusCode": 401, "level": "warning", "message": "Unauthenticated" },
+  { "id": "expected-403", "timestamp": 1788912004000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/waffo/checkout", "statusCode": 403, "level": "warning", "message": "Test account not allowlisted" },
+  { "id": "payload-413", "timestamp": 1788912005000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/generate", "statusCode": 413, "level": "warning", "message": "413 Request Entity Too Large" },
+  { "id": "expected-429", "timestamp": 1788912006000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/generate", "statusCode": 429, "level": "warning", "message": "Rate limit" },
+  { "id": "generate-500", "timestamp": 1788912007000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/generate", "statusCode": 500, "level": "error", "message": "generation failed" },
+  { "id": "gateway-502", "timestamp": 1788912008000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/generate", "statusCode": 502, "level": "error", "message": "fal provider failed" },
+  { "id": "waffo-error", "timestamp": 1788912009000, "environment": "production", "deploymentId": "dpl_fixture", "method": "POST", "route": "/api/waffo/checkout", "statusCode": 400, "level": "warning", "message": "Waffo checkout creation failed" },
+  { "id": "storage-error", "timestamp": 1788912010000, "environment": "production", "deploymentId": "dpl_fixture", "method": "PATCH", "route": "/api/uploads/room-image", "statusCode": 400, "level": "warning", "message": "storage upload failed" },
+  { "id": "preview-500", "timestamp": 1788912011000, "environment": "preview", "deploymentId": "dpl_preview", "method": "POST", "route": "/api/generate", "statusCode": 500, "level": "error", "message": "preview failure" }
+]

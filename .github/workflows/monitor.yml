@@ -1,0 +1,54 @@
+name: RoomFacelift Production Error Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Analyze logs without sending Feishu messages
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roomfacelift-production-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Restore monitor state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/state.json
+          key: roomfacelift-monitor-state-${{ github.run_id }}
+          restore-keys: |
+            roomfacelift-monitor-state-
+      - name: Initialize state when cache is empty
+        run: test -f data/state.json || cp data/state.example.json data/state.json
+      - run: npm ci
+      - name: Monitor production runtime logs
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+        run: npm run monitor -- ${{ inputs.dry_run && '--dry-run' || '' }}
+      - name: Save monitor state
+        if: always() && hashFiles('data/state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: data/state.json
+          key: roomfacelift-monitor-state-${{ github.run_id }}
