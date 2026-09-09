@@ -29,15 +29,31 @@ GET https://api.vercel.com/v6/deployments
 It then reads only that deployment's production logs using:
 
 ```text
-GET https://api.vercel.com/v1/projects/{projectId}/deployments/{deploymentId}/runtime-logs
-    ?teamId=<VERCEL_TEAM_ID>
+GET https://vercel.com/api/logs/request-logs
+    ?projectId=<VERCEL_PROJECT_ID>
+    &ownerId=<VERCEL_TEAM_ID>
+    &deploymentId=<resolved deployment>
     &environment=production
-    &since=<last processed timestamp>
-    &until=<now>
-    &limit=1000
+    &startDate=<last processed timestamp, milliseconds>
+    &endDate=<now, milliseconds>
+    &page=0
 ```
 
-Vercel documents the available runtime fields and retention limits in [Runtime Logs](https://vercel.com/docs/logs/runtime). The parser accepts JSON arrays, `{ logs: [] }`, `{ data: [] }`, NDJSON, and SSE-style `data:` lines so response formatting changes fail safely.
+This is the finite historical JSON endpoint used by the [official Vercel CLI implementation](https://github.com/vercel/vercel/blob/main/packages/cli/src/util/logs-v2.ts), returning `{ rows, hasMoreRows }`. It is not a separately documented public REST API contract; account access and future compatibility must be confirmed by an authenticated Actions dry-run. The monitor follows pages within a total 20-second logs budget and caps the historical query at 1,000 records. If more pages remain at the cap, it fails without advancing state. Nested request messages are preserved, including error messages after the first entry.
+
+The previous `/v1/projects/{projectId}/deployments/{deploymentId}/runtime-logs` endpoint [returns a stream](https://github.com/vercel/sdk/blob/main/docs/sdks/logs/README.md). Its [SDK request](https://github.com/vercel/sdk/blob/main/src/funcs/logsGetRuntimeLogs.ts) uses `application/stream+json` and does not declare `since`, `until`, `limit`, or `environment` query parameters. Adding those parameters did not establish a finite historical query. The previous unbounded `response.text()` could therefore wait until the workflow killed the job.
+
+### Request bounds and diagnostics
+
+- Deployment lookup has a 20-second deadline covering headers and the response body. All historical pages share a separate 20-second deadline, so every page has at most 20 seconds remaining.
+- Requests accept JSON/NDJSON, without advertising SSE. All bodies use a reader, with a 16 MiB per-response size cap.
+- Unexpected NDJSON, `application/stream+json`, and SSE responses have a 12-second read deadline and a 5-second idle deadline. EOF or `[DONE]` completes the response. Reaching 1,000 records without completion, timeout, or invalid data fails safely instead of persisting a partial window.
+- Every early exit cancels the reader; request completion/failure aborts the controller and clears timers. Reader cancellation itself is never awaited indefinitely.
+- `AbortError` and `TimeoutError` become `Monitor could not read Vercel logs safely: Vercel runtime logs request timed out.` Network errors and HTTP failures expose only fixed messages and status codes, never raw response bodies or URLs.
+- Actions prints deployment lookup, logs lookup, received count, analysis, and dry-run completion stages. The final console summary contains counts only, without alert messages or deployment identifiers.
+- The workflow remains scheduled every five minutes with `timeout-minutes: 4` as the final safeguard.
+
+Vercel documents retention limits in [Runtime Logs](https://vercel.com/docs/logs/runtime). Local fixtures also support JSON arrays, `{ logs: [] }`, and `{ data: [] }`.
 
 ### 3. Create a Feishu custom bot
 

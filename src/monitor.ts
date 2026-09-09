@@ -15,6 +15,7 @@ export async function runMonitor(input: {
   statePath: string;
   now?: number;
   fetcher?: typeof fetch;
+  onProgress?: (message: string) => void;
 }) {
   const now = input.now ?? Date.now();
   const originalState = await loadState(input.statePath);
@@ -26,17 +27,25 @@ export async function runMonitor(input: {
       logs = parseRuntimeLogs(await readFile(input.fixturePath, "utf8"), deploymentId);
     } else {
       if (!input.config) throw new Error("Vercel configuration is required when no fixture is selected.");
+      input.onProgress?.("Fetching latest production deployment...");
       deploymentId = await getLatestProductionDeployment(input.config, input.fetcher);
+      input.onProgress?.("Production deployment resolved.");
       const since = Math.max(0, (originalState.lastProcessedTimestamp || now - DEFAULT_LOOKBACK_MS) - 1000);
+      input.onProgress?.("Fetching runtime logs...");
       logs = await getRuntimeLogs({ config: input.config, deploymentId, since, until: now, ...(input.fetcher ? { fetcher: input.fetcher } : {}) });
     }
   } catch (error) {
     throw new Error(`Monitor could not read Vercel logs safely: ${redactSecrets(error instanceof Error ? error.message : error)}`);
   }
 
+  input.onProgress?.(`Runtime logs received: ${logs.length}`);
+  input.onProgress?.("Analyzing logs...");
   const productionLogs = logs.filter((log) => log.environment === "production").map((log) => ({ ...log, deploymentId: log.deploymentId || deploymentId }));
   const { state, alerts } = analyzeLogs(productionLogs, originalState, now);
-  if (input.dryRun) return { deploymentId, logsRead: productionLogs.length, alerts, statePersisted: false };
+  if (input.dryRun) {
+    input.onProgress?.("Dry run completed.");
+    return { deploymentId, logsRead: productionLogs.length, alerts, statePersisted: false };
+  }
   if (!input.config) throw new Error("Feishu configuration is required outside dry-run mode.");
 
   await saveState(input.statePath, state);
