@@ -6,7 +6,9 @@ import type { MonitorConfig, RuntimeLog } from "./types.js";
 
 const API = "https://api.vercel.com";
 const REQUEST_TIMEOUT_MS = 20_000;
-const CLI_TIMEOUT_MS = 20_000;
+const CLI_TIMEOUT_MS = 45_000;
+const CLI_RETRY_COUNT = 1;
+const CLI_RETRY_DELAY_MS = 1_500;
 const CLI_KILL_GRACE_MS = 1_000;
 const LOG_LIMIT = 1000;
 const MAX_STDOUT_BYTES = 16 * 1024 * 1024;
@@ -14,7 +16,16 @@ const MAX_STDERR_BYTES = 64 * 1024;
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 const VERCEL_CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../node_modules/vercel/dist/index.js");
 
-class SafeVercelError extends Error {}
+class SafeVercelError extends Error {
+  readonly retryable: boolean;
+  constructor(message: string, options: { retryable?: boolean } = {}) {
+    super(message);
+    this.name = "SafeVercelError";
+    this.retryable = options.retryable ?? false;
+  }
+}
+
+export { SafeVercelError };
 
 export type VercelLogsRunner = (args: string[], token: string) => Promise<{
   exitCode: number | null;
@@ -43,15 +54,51 @@ export async function getRuntimeLogs(input: {
   since: number;
   until: number;
   runner?: VercelLogsRunner;
+  retryDelayMs?: number;
 }) {
   const args = buildVercelLogsArgs(input);
-  const result = await (input.runner ?? runVercelLogsCli)(args, input.config.vercelToken);
-  if (result.exitCode !== 0) {
-    const detail = safeCliMessage(result.stderr, input.config);
-    throw new SafeVercelError(`Vercel logs command failed (exit ${result.exitCode ?? "unknown"})${detail ? `: ${detail}` : "."}`);
-  }
+  const runner = input.runner ?? runVercelLogsCli;
+  const result = await runVercelLogsWithRetry(async () => {
+    const output = await runner(args, input.config.vercelToken);
+    if (output.exitCode !== 0) {
+      const detail = safeCliMessage(output.stderr, input.config);
+      throw new SafeVercelError(
+        `Vercel logs command failed (exit ${output.exitCode ?? "unknown"})${detail ? `: ${detail}` : "."}`,
+        { retryable: isRetryableCliFailure(detail) },
+      );
+    }
+    return output;
+  }, input.retryDelayMs ?? CLI_RETRY_DELAY_MS);
   const logs = parseRuntimeLogs(result.stdout, input.deploymentId, true);
   return logs.filter((log) => log.timestamp >= input.since && log.timestamp <= input.until);
+}
+
+const NON_RETRYABLE_CLI_FAILURE = /(unauthorized|authentication|not logged in|invalid (api )?token|not authorized|\b401\b|forbidden|permission denied|not allowed|cannot read|insufficient|access denied|\b403\b|unknown option|invalid argument|unexpected argument|invalid value|\busage:)/i;
+
+function isRetryableCliFailure(detail: string): boolean {
+  return !NON_RETRYABLE_CLI_FAILURE.test(detail);
+}
+
+async function runVercelLogsWithRetry(
+  attempt: () => Promise<{ exitCode: number | null; stdout: string; stderr: string }>,
+  delayMs: number,
+) {
+  for (let attemptNo = 0; ; attemptNo++) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!isRetryableVercelError(error) || attemptNo >= CLI_RETRY_COUNT) throw error;
+      await sleep(delayMs);
+    }
+  }
+}
+
+function isRetryableVercelError(error: unknown): boolean {
+  return error instanceof SafeVercelError && error.retryable;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
 export function buildVercelLogsArgs(input: {
@@ -127,7 +174,7 @@ export function runVercelLogsCli(
       clearTimeout(timeout);
       clearTimeout(killTimer);
       if (timedOut) {
-        reject(new SafeVercelError("Vercel logs command timed out."));
+        reject(new SafeVercelError("Vercel logs command timed out.", { retryable: true }));
         return;
       }
       if (outputExceeded) {

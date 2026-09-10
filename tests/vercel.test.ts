@@ -14,6 +14,7 @@ import {
   getLatestProductionDeployment,
   getRuntimeLogs,
   runVercelLogsCli,
+  SafeVercelError,
 } from "../src/vercel.js";
 import type { VercelLogsRunner } from "../src/vercel.js";
 
@@ -176,6 +177,66 @@ test("CLI timeout sends SIGTERM then SIGKILL and reports a fixed error", async (
     message: "Vercel logs command timed out.",
   });
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("logs query retries once after a CLI timeout and succeeds", async () => {
+  let calls = 0;
+  const flakyRunner: VercelLogsRunner = async () => {
+    calls++;
+    if (calls === 1) throw new SafeVercelError("Vercel logs command timed out.", { retryable: true });
+    return { exitCode: 0, stdout: JSON.stringify(entry), stderr: "" };
+  };
+  const logs = await getRuntimeLogs({ ...input, runner: flakyRunner, retryDelayMs: 0 });
+  assert.equal(calls, 2);
+  assert.equal(logs.length, 1);
+});
+
+test("logs query fails after two timeouts without further retries", async () => {
+  let calls = 0;
+  const timeoutRunner: VercelLogsRunner = async () => {
+    calls++;
+    throw new SafeVercelError("Vercel logs command timed out.", { retryable: true });
+  };
+  await assert.rejects(
+    getRuntimeLogs({ ...input, runner: timeoutRunner, retryDelayMs: 0 }),
+    /Vercel logs command timed out\./,
+  );
+  assert.equal(calls, 2);
+});
+
+test("recoverable CLI temporary failure retries once and succeeds", async () => {
+  let calls = 0;
+  const flakyRunner: VercelLogsRunner = async () => {
+    calls++;
+    if (calls === 1) return { exitCode: 1, stdout: "", stderr: "Error: rate limit exceeded" };
+    return { exitCode: 0, stdout: JSON.stringify(entry), stderr: "" };
+  };
+  const logs = await getRuntimeLogs({ ...input, runner: flakyRunner, retryDelayMs: 0 });
+  assert.equal(calls, 2);
+  assert.equal(logs.length, 1);
+});
+
+test("logs query does not retry after a successful first attempt", async () => {
+  let calls = 0;
+  const successRunner: VercelLogsRunner = async () => {
+    calls++;
+    return { exitCode: 0, stdout: JSON.stringify(entry), stderr: "" };
+  };
+  await getRuntimeLogs({ ...input, runner: successRunner, retryDelayMs: 0 });
+  assert.equal(calls, 1);
+});
+
+test("non-retryable CLI failure is not retried", async () => {
+  let calls = 0;
+  const forbiddenRunner: VercelLogsRunner = async () => {
+    calls++;
+    return { exitCode: 1, stdout: "", stderr: "Error: Forbidden (403)" };
+  };
+  await assert.rejects(
+    getRuntimeLogs({ ...input, runner: forbiddenRunner, retryDelayMs: 0 }),
+    /Forbidden \(403\)/,
+  );
+  assert.equal(calls, 1);
 });
 
 test("dry-run does not call Feishu or persist state and reports safe stages", async (t) => {
